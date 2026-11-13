@@ -1,161 +1,162 @@
 # KJournal
 
-**KJournal** is an in-memory journal. Writers add `Record` entries, and readers receive them through their own channels, filtered by `ReaderFilter`. You can set timeouts, default values, and a folder for saving records to files. Errors and lost records are written to `crashReport.kj`, and the current state is available through `GetMetrics`.
+**KJournal** - это журнал в памяти. Писатели добавляют записи `Record`, а читатели получают их через свои каналы и с учётом фильтра `ReaderFilter`. Можно задать тайм-ауты, значения по умолчанию и папку для сохранения записей в файлы. Ошибки и потерянные записи сохраняются в `crashReport.kj`, а текущее состояние видно через `GetMetrics`.
 
-## Settings
+## Настройки
 
-| Name | Type | Default | Description |
+| Название | Тип | По умолчанию | Описание |
 |---|---|---|---|
-| `DefaultReaderBuf` | `int` | `512` | Default reader buffer size |
-| `DefaultReaderFilter` | `ReaderFilter` | pass all records | Default reader filter |
-| `MaxInGroup` | `int` | `64` | Maximum records per single group read |
-| `FileDumperDir` | `string` | empty (dumper disabled) | Folder for saving records to files |
-| `AlarmRWGroup` | `time.Duration` | `0` (no timeout) | Timeout for waiting on reader and writer groups |
-| `AlarmWrite` | `time.Duration` | `0` (no timeout) | Timeout for writing to a reader channel |
+| `DefaultReaderBuf` | `int` | `512` | Размер буфера читателя по умолчанию |
+| `DefaultReaderFilter` | `ReaderFilter` | пропускать все записи | Фильтр читателя по умолчанию |
+| `MaxInGroup` | `int` | `64` | Максимум записей за одно чтение в одной группе |
+| `AlarmRWGroup` | `time.Duration` | `0` (без тайм-аута) | Тайм-аут ожидания групп читателей и писателей |
+| `AlarmWrite` | `time.Duration` | `0` (без тайм-аута) | Тайм-аут записи в канал читателя |
+| `FileDumperDir` | `string` | пусто (дампер выключен) | Папка для сохранения записей в файлы |
+| `CrashReportDir` | `string` | `"./"` (рядом с исполняемым файлом) | Папка для файла `crashReport.kj` |
 
-## Lifecycle
+## Жизненный цикл
 
-The journal goes through the statuses `OFF`, `Running`, `Stop`, and `ON`. Startup moves it from `OFF` to `ON`, and shutdown moves it back to `OFF`. Starting an already running journal or stopping an already stopped one returns an error.
+Журнал проходит через статусы `OFF`, `Running`, `Stop` и `ON`. Запуск переводит его из `OFF` в `ON`, а остановка - обратно в `OFF`. Повторный запуск уже работающего журнала и повторная остановка уже остановленного возвращают ошибку.
 
-### Startup
+### Запуск
 
-Startup is performed by the `Run` method and takes `KJSettings`. The method works only from the `OFF` status; in any other status it returns the error "KJournal is already running". Before start, the settings are normalized: empty and zero values are replaced with defaults. Then the context and service fields are created, and the internal shutdown goroutine is started. After that the status changes to `ON`, and the journal is ready to work.
+Запуск выполняется методом `Run` и принимает настройки `KJSettings`. Метод работает только из статуса `OFF`; в любом другом статусе он возвращает ошибку «KJournal is already running». Перед стартом настройки нормализуются: пустые и нулевые значения заменяются значениями по умолчанию. Затем создаются контекст и служебные поля, и запускается внутренняя горутина остановки. После этого статус меняется на `ON`, и журнал готов к работе.
 
-### Shutdown
+### Остановка
 
-Shutdown is performed by the `Endwork` method. The method works only from the `ON` status; in any other status it returns the error "KJournal is already stopped". Shutdown is idempotent: a repeated call does nothing. Inside, the context is canceled and the internal shutdown goroutine is awaited. The goroutine waits for writers and readers - with or without the `AlarmRWGroup` timeout. Then `crashReport.kj` is closed, and the status changes to `OFF`.
+Остановка выполняется методом `Endwork`. Метод работает только из статуса `ON`; в другом статусе он возвращает ошибку «KJournal is already stopped». Остановка идемпотентна: повторный вызов ничего не делает. Внутри отменяется контекст и ожидается завершение внутренней горутины остановки. Горутина дожидается писателей и читателей - с тайм-аутом `AlarmRWGroup` или без него. Затем закрывается `crashReport.kj`, статус меняется на `OFF`.
 
-## Entities
+## Сущности
 
-### Record
+### Запись
 
-`Record` is a single journal entry. It is created via `NewRecord`, and the time is set automatically. The `ToString` method returns a text representation of the record.
+`Record` - одна запись журнала. Создаётся через `NewRecord`, время проставляется автоматически. Метод `ToString` возвращает текстовое представление записи.
 
-| Name | Type | Description |
+| Название | Тип | Описание |
 |---|---|---|
-| `Author` | `string` | Record author |
-| `Level` | `string` | Record level |
-| `Code` | `string` | Record code |
-| `Time` | `time.Time` | Creation time |
-| `Message` | `string` | Message text |
+| `Author` | `string` | Автор записи |
+| `Level` | `string` | Уровень записи |
+| `Code` | `string` | Код записи |
+| `Time` | `time.Time` | Время создания |
+| `Message` | `string` | Текст сообщения |
 
 API:
-- `NewRecord(author, level, code, message string) *Record` - creates a record;
-- `(*Record).ToString() string` - returns a text representation.
+- `NewRecord(author, level, code, message string) *Record` - создаёт запись;
+- `(*Record).ToString() string` - возвращает текстовое представление.
 
-### Reader
+### Читатель
 
-> **Warning**
+> **Предупреждение**
 >
-> The reader must be created before potential writers, otherwise it will miss records sent before its creation.
+> Читатель должен быть создан раньше потенциальных писателей, иначе он пропустит записи, отправленные до его создания.
 
-`Reader` is a record reader. It has its own channel and filter. It is created via `NewReader` and removed via `DelReader`.
+`Reader` - читатель записей. У него есть свой канал и фильтр. Создаётся через `NewReader`, удаляется через `DelReader`.
 
-| Name | Type | Description |
+| Название | Тип | Описание |
 |---|---|---|
-| `Chan` | `chan *Record` | Channel that receives records |
-| `Filter` | `ReaderFilter` | Filter: `true` means the record matches the reader |
+| `Chan` | `chan *Record` | Канал, в который приходят записи |
+| `Filter` | `ReaderFilter` | Фильтр: `true` - запись подходит читателю |
 
-> `ReaderFilter` is `func(*Record) bool`.
-
-API:
-- `NewReader(id *string, buf int, filter ReaderFilter) (string, error)` - creates a reader and returns its ID;
-- `DelReader(id string) error` - removes a reader;
-- `AwaitWritersStop()` - waits for the journal to stop, then for writers to finish.
-
-### Writer
-
-The writer adds records to the journal. It is registered via `NewWriter` and removed via `DelWriter`.
+> `ReaderFilter` - это `func(*Record) bool`.
 
 API:
-- `NewWriter() error` - registers a writer;
-- `DelWriter() error` - removes a writer.
+- `NewReader(id *string, buf int, filter ReaderFilter) (string, error)` - создаёт читателя и возвращает его ID;
+- `DelReader(id string) error` - удаляет читателя;
+- `AwaitWritersStop()` - ждёт остановки журнала, затем завершения писателей.
 
-## Read/Write
+### Писатель
 
-> **Warning**
+Писатель добавляет записи в журнал. Регистрируется через `NewWriter`, удаляется через `DelWriter`.
+
+API:
+- `NewWriter() error` - регистрирует писателя;
+- `DelWriter() error` - снимает писателя.
+
+## Чтение/Запись
+
+> **Предупреждение**
 >
-> A good reader must keep up with writers and handle bursts of unprocessed records.
+> Хороший читатель должен успевать за писателями и справляться со всплесками необработанных записей.
 
-### Read
+### Чтение
 
-Reading is performed by the `Read` and `ReadGroup` methods. Both methods find a reader by ID and do not block: if there is no data, they return an empty result immediately. `Read` returns one record, `ReadGroup` returns up to `MaxInGroup` records at a time. If no reader with such ID is found, both methods return an error.
-
-API:
-- `Read(id string) (*Record, error)` - returns one record, or `nil` if there is no data;
-- `ReadGroup(id string) ([]*Record, error)` - returns up to `MaxInGroup` records; an empty slice if there is no data.
-
-### Write
-
-Writing is performed by the `Write` method. The method delivers the record to all readers whose filter allowed it. If `AlarmWrite` is set, delivery uses a timeout; readers that did not accept the record in time are considered blocked. If there are no readers or some of them are blocked, the record is lost, and an error message is written to `crashReport.kj`.
+Чтение выполняется методами `Read` и `ReadGroup`. Оба метода находят читателя по ID и не блокируются: если данных нет, они сразу возвращают пустой результат. `Read` возвращает одну запись, `ReadGroup` - до `MaxInGroup` записей за раз. Если читатель с таким ID не найден, оба метода возвращают ошибку.
 
 API:
-- `Write(record *Record)` - delivers the record to matching readers.
+- `Read(id string) (*Record, error)` - возвращает одну запись или `nil`, если данных нет;
+- `ReadGroup(id string) ([]*Record, error)` - возвращает до `MaxInGroup` записей; пустой срез, если данных нет.
 
-## Metrics
+### Запись
 
-`GetMetrics` returns a snapshot of the current journal state: status, number of writers and readers, and the fill level of each reader's channel.
+Запись выполняется методом `Write`. Метод передаёт запись всем читателям, чей фильтр её пропустил. Если задан `AlarmWrite`, отправка идёт с тайм-аутом; читатели, не принявшие запись вовремя, считаются заблокированными. Если читателей нет или часть из них заблокирована, запись теряется, а в `crashReport.kj` пишется сообщение об ошибке.
 
-| Name | Type | Description |
+API:
+- `Write(record *Record)` - передаёт запись подходящим читателям.
+
+## Метрики
+
+`GetMetrics` возвращает снимок текущего состояния журнала: статус, число писателей и читателей, а также заполнение каналов каждого читателя.
+
+| Название | Тип | Описание |
 |---|---|---|
-| `Status` | `string` | Journal status: `OFF`, `Running`, `Stop`, `ON`, or `Unknown` |
-| `Writers` | `int` | Current number of writers |
-| `Readers` | `int` | Current number of readers |
-| `ReadersFill` | `map[string]struct{ Len, Cap int }` | For each reader: how many records are in the channel (`Len`) and the buffer size (`Cap`) |
+| `Status` | `string` | Статус журнала: `OFF`, `Running`, `Stop`, `ON` или `Unknown` |
+| `Writers` | `int` | Текущее число писателей |
+| `Readers` | `int` | Текущее число читателей |
+| `ReadersFill` | `map[string]struct{ Len, Cap int }` | Для каждого читателя: сколько записей в канале (`Len`) и размер буфера (`Cap`) |
 
-## File Dump
+## Сброс в файл
 
-If `FileDumperDir` is set, the journal saves records to files. The dump is performed by the dumper - a separate reader that takes records and writes them to disk. If `FileDumperDir` is empty, the dumper does not start.
+Если задан `FileDumperDir`, журнал сохраняет записи в файлы. Сброс выполняет дампер - отдельный читатель, который забирает записи и пишет их на диск. Если `FileDumperDir` пуст, дампер не запускается.
 
-Before work, the dumper prepares the folder: creates it if needed, checks that it is a directory, and checks that it is writable. A relative path is resolved from the executable's directory. After successful preparation, the path is stored as absolute.
+Перед началом работы дампер готовит папку: создаёт её при необходимости, проверяет, что это каталог, и проверяет запись в неё. Относительный путь считается от каталога исполняемого файла. После успешной подготовки путь сохраняется уже как абсолютный.
 
-Each record is written to a separate file named by time. The record is appended line by line in text form. Errors on open, write, and close go to `crashReport.kj`.
+Записи сбрасываются в файл с именем по времени: один файл на одну пачку накопленных записей. Записи добавляются построчно в текстовом виде. Ошибки открытия, записи и закрытия файла попадают в `crashReport.kj`.
 
-The dumper runs while the journal is running and finishes on shutdown. Before finishing, it flushes the accumulated records to a file.
+Дампер работает, пока журнал запущен, и завершается при остановке. Перед завершением он дописывает накопленные записи в файл.
 
-## Critical Errors
+## Критические ошибки
 
-If the journal works incorrectly or records do not arrive, look for the cause in `crashReport.kj`. The file is created next to the executable.
+Если журнал работает неправильно или записи не доходят, ищи причину в `crashReport.kj`. Файл создаётся в папке `CrashReportDir`; по умолчанию — рядом с исполняемым файлом.
 
-Everything that broke the journal is written there:
-- a record arrived but there are no readers;
-- a reader did not accept the record in time;
-- writers or readers did not finish within the allotted time;
-- file system errors while dumping records.
+Туда пишется всё, что сломало работу журнала:
+- запись пришла, а читателей нет;
+- читатель не принял запись вовремя;
+- писатели или читатели не завершились за отведённое время;
+- ошибки файловой системы при сбросе записей.
 
-## Example
+## Пример
 
-- **Lifecycle**
+- **Жизненный цикл**
 ```go
 journal := KJournal.NewKJournal()
 settings := KJournal.KJSettings{
-	DefaultReaderBuf:    512,                  // default reader buffer size
-	DefaultReaderFilter: nil,                  // default filter (nil = pass all)
-	MaxInGroup:          64,                   // max records per group read
-	FileDumperDir:       "./records",          // folder for saving records (empty = dumper disabled)
-	AlarmRWGroup:        5 * time.Second,      // group wait timeout (0 = no timeout)
-	AlarmWrite:          2 * time.Second,      // reader channel write timeout (0 = no timeout)
+	DefaultReaderBuf:    512,                  // размер буфера читателя по умолчанию
+	DefaultReaderFilter: nil,                  // фильтр по умолчанию (nil = пропускать все)
+	MaxInGroup:          64,                   // максимум записей за одно чтение группы
+	FileDumperDir:       "./records",          // папка для сохранения записей (пусто = дампер выключен)
+	AlarmRWGroup:        5 * time.Second,      // тайм-аут ожидания групп (0 = без тайм-аута)
+	AlarmWrite:          2 * time.Second,      // тайм-аут записи в канал читателя (0 = без тайм-аута)
 }
 
-// Startup
+// Запуск
 if err := journal.Run(settings); err != nil {
 	panic(err)
 }
 
-// ... Journal work
+// ... Работа журнала
 
-// Shutdown
+// Остановка
 if err = journal.Endwork(); err != nil {
 	fmt.Println(err.Error())
 }
 ```
 
-- **Getting a journal snapshot (metrics)**
+- **Получение снимка журнала(метрик)**
 ```go
 metrics := journal.GetMetrics()
 ```
 
-- **Reader/Read**
+- **Читатель/Чтение**
 ```go
 readerID, err := journal.NewReader(nil, 0, nil)
 if err != nil {
@@ -163,7 +164,7 @@ if err != nil {
 }
 defer journal.DelReader(readerID)
 
-// Auto-cancel: exit the loop once writers stop
+// Автоотмена: как только писатели остановятся - выходим из цикла
 done := make(chan struct{})
 go func() {
 	journal.AwaitWritersStop()
@@ -173,7 +174,7 @@ go func() {
 for {
 	select {
 	case <-done:
-		// read the remaining records and exit
+		// дочитываем остаток и выходим
 		records, _ := journal.ReadGroup(readerID)
 		for _, record := range records {
 			fmt.Println(record.ToString())
@@ -191,19 +192,15 @@ for {
 }
 ```
 
-- **Writer/Write**
+- **Писатель/Запись**
 ```go
-// Register a writer
+// Регистрируем писателя
 if err := journal.NewWriter(); err != nil {
 	panic(err)
 }
 defer journal.DelWriter()
 
-// Create and publish a record
+// Создаём и публикуем запись
 record := KJournal.NewRecord("app", "Error", "E001", "something went wrong")
 journal.Write(record)
 ```
-
----
-
-This documentation is also available in [Russian](src/docs/README.ru.md).

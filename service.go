@@ -11,10 +11,10 @@ import (
 //region Metrics
 
 type KJMetrics struct {
-	Status      string
-	Writers     int
-	Readers     int
-	ReadersFill map[string]struct{ Len, Cap int }
+	Status      string                            `json:"Status"`
+	Writers     int                               `json:"Writers"`
+	Readers     int                               `json:"Readers"`
+	ReadersFill map[string]struct{ Len, Cap int } `json:"ReadersFill"`
 }
 
 func (kj *KJournal) GetMetrics() KJMetrics {
@@ -185,13 +185,38 @@ func (kj *KJournal) Dumper() {
 
 //region Crash Report
 
-func (kj *KJournal) createCrashReport() {
-	exePath, err := os.Executable()
-	if err != nil {
-		panic(fmt.Sprintf("KJournal: crash report: get executable: %v", err))
+//region^ Helper Functions
+
+// desc: Resolve and prepare crash report directory
+func (kj *KJournal) prepareCrashReportDir() (string, error) {
+	dir := kj.settings.CrashReportDir
+
+	if !filepath.IsAbs(dir) {
+		exePath, err := os.Executable()
+		if err != nil {
+			return "", fmt.Errorf("get executable: %w", err)
+		}
+		dir = filepath.Join(filepath.Dir(exePath), dir)
 	}
 
-	path := filepath.Join(filepath.Dir(exePath), "crashReport.kj")
+	dir = filepath.Clean(dir)
+
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		return "", fmt.Errorf("create crash report dir %q: %w", dir, err)
+	}
+
+	return dir, nil
+}
+
+//endregion^
+
+func (kj *KJournal) createCrashReport() {
+	dir, err := kj.prepareCrashReportDir()
+	if err != nil {
+		panic(fmt.Sprintf("KJournal: crash report: %v", err))
+	}
+
+	path := filepath.Join(dir, "crashReport.kj")
 
 	f, err := os.OpenFile(path, os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0o644)
 	if err != nil {

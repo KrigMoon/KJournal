@@ -18,8 +18,8 @@ type KJStatus int
 const (
 	KJStatusOFF KJStatus = iota
 	KJStatusRunning
-	KJStatusStop
 	KJStatusON
+	KJStatusStop
 )
 
 func TranslateStatusToString(s KJStatus) string {
@@ -44,12 +44,13 @@ func TranslateStatusToString(s KJStatus) string {
 //region^ KJournal's Settings
 
 type KJSettings struct {
-	DefaultReaderBuf    int
-	DefaultReaderFilter ReaderFilter
-	MaxInGroup          int
-	FileDumperDir       string
-	AlarmRWGroup        time.Duration
-	AlarmWrite          time.Duration
+	DefaultReaderBuf    int           `json:"DefaultReaderBuf"`
+	DefaultReaderFilter ReaderFilter  `json:"-"`
+	MaxInGroup          int           `json:"MaxInGroup"`
+	AlarmRWGroup        time.Duration `json:"AlarmRWGroup"`
+	AlarmWrite          time.Duration `json:"AlarmWrite"`
+	FileDumperDir       string        `json:"FileDumperDir"`
+	CrashReportDir      string        `json:"CrashReportDir"`
 }
 
 // desc: Normalizing data and setting default values
@@ -66,6 +67,10 @@ func (kjs *KJSettings) normalize() {
 
 	if kjs.MaxInGroup <= 0 {
 		kjs.MaxInGroup = 64
+	}
+
+	if kjs.CrashReportDir == "" {
+		kjs.CrashReportDir = "./"
 	}
 }
 
